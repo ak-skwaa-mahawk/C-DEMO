@@ -21,9 +21,9 @@ void update_segment_state(float x, float y, float vitality) {
     vault_store_state("segment_state", json);
 }
 
-float get_stability() {
+float get_stability(const char* metric) {
     // Vault computes derived metric only — never raw data
-    double stability = vault_compute_metric("segment_stability");
+    double stability = vault_compute_metric(metric);
     return (float)stability;
 }
 
@@ -48,10 +48,10 @@ int main() {
         vault_store_state("segment_sensor", state_json);
 
         // === VAULT COMPUTE: Only derived metric controls the motor ===
-        float stability = get_stability();
+        float stability = get_stability("segment_stability");
 
-        // Optional: update segment position + vitality (example values)
-        update_segment_state(12.5f + i, 45.3f - i*0.5f, stability);
+        // Optional: update segment position + vitality
+        update_segment_state(12.5f + i, 45.3f - i * 0.5f, stability);
 
         printf("Cycle %d: Sensor = %d | Stability = %.4f → ", i+1, sensor, stability);
 
