@@ -48,3 +48,15 @@ class SovereignVault {
 
 // Singleton — the phone IS the Floor
 final sovereignVault = SovereignVault();
+
+// Example: camera or IMU data
+final rawState = {
+  "center_x": 320,
+  "center_y": 240,
+  "vitality": 0.87,
+};
+
+await sovereignVault.storeState(rawState, purpose: "vision_target");
+
+final stability = await sovereignVault.computeMetric("aim_lock_stability");
+print("Floor-approved stability: ${stability['stability_score']}");
