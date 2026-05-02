@@ -2,6 +2,8 @@
 #include <string.h>
 
 // === SOVEREIGN VAULT SHIM — Floor-owned (enclave + encrypted DB in production) ===
+// All raw state is captured and encrypted inside Ch’anchyah Vault.
+// Only derived metrics (vhitzee-coherent) are returned for control.
 
 void vault_store_state(const char* purpose, const char* json_state) {
     printf("[VAULT] Stored %s → %s\n", purpose, json_state);
