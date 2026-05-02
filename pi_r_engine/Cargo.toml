@@ -5,3 +5,10 @@ edition = "2021"
 
 [lib]
 crate-type = ["cdylib"]  # for Flutter FFI
+[package]
+name = "pi_r_engine"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]  # for Flutter FFI
