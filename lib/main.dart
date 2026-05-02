@@ -1,7 +1,7 @@
-// main.dart — Sovereign Aim Bot (Phone = Floor Client)
+// main.dart — Sovereign Aim Bot + Mesh Node (Phone = Floor Client)
 import 'package:flutter/material.dart';
-import 'dart:math'; // for simulated sensors
-import 'sovereign_vault.dart'; // the file you pasted
+import 'dart:math';
+import 'sovereign_vault.dart'; // your SovereignVault.dart file
 
 void main() {
   runApp(const SovereignAimBotApp());
@@ -30,8 +30,9 @@ class AimBotScreen extends StatefulWidget {
 class _AimBotScreenState extends State<AimBotScreen> {
   double stability = 0.0;
   double vitality = 0.0;
+  bool isMeshNode = false;
 
-  // Simulate phone sensor data (replace with real camera/IMU in production)
+  // Simulate phone sensor data (replace with real camera + IMU later)
   void _simulateSensorTick() async {
     final rawState = {
       "center_x": Random().nextDouble() * 640,
@@ -49,13 +50,19 @@ class _AimBotScreenState extends State<AimBotScreen> {
     });
   }
 
+  // Enable device as Floor mesh node
+  void _enableMeshNode() async {
+    await sovereignVault.enableMeshNodeMode();
+    setState(() => isMeshNode = true);
+    // Optional: run continuously as background node
+    sovereignVault.runAsNode();
+  }
+
   @override
   void initState() {
     super.initState();
-    // Simulate continuous sensor input (like real phone camera/IMU loop)
-    Future.delayed(Duration.zero, () {
-      _simulateSensorTick();
-    });
+    // Start sensor simulation
+    Future.delayed(Duration.zero, _simulateSensorTick);
   }
 
   @override
@@ -80,8 +87,13 @@ class _AimBotScreenState extends State<AimBotScreen> {
               child: const Text("Simulate Sensor Tick (Real camera/IMU here)"),
             ),
             const SizedBox(height: 20),
+            ElevatedButton(
+              onPressed: isMeshNode ? null : _enableMeshNode,
+              child: Text(isMeshNode ? "Mesh Node ACTIVE" : "Enable Floor Mesh Node Mode"),
+            ),
+            const SizedBox(height: 40),
             const Text("All raw data owned by Ch’anchyah Vault\n"
-                "Only derived metrics used for control", 
+                "Only derived metrics used for control + mesh relay", 
                 textAlign: TextAlign.center),
           ],
         ),
