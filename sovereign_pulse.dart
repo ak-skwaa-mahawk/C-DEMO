@@ -1,4 +1,4 @@
-// sovereign_pulse.dart — 79.79 Hz Sovereign Heartbeat (Rust Bridge + Extraction Guard)
+// sovereign_pulse.dart — 79.79 Hz Sovereign Heartbeat (Rust Bridge + Extraction Guard + Bloom Callback)
 import 'dart:async';
 import 'package:flutter/scheduler.dart';
 import 'rust_bridge.dart'; // Flutter → Rust FFI
@@ -11,6 +11,9 @@ class SovereignPulse {
   final Duration _interval = Duration(microseconds: (1000000 / 79.79).round());
 
   double currentHeat = 0.5; // Adaptive system variable for gear-ratio shift
+
+  // Callback for visual Bloom when Extraction Guard triggers
+  void Function(double piRValue)? onBloom;
 
   void start() {
     // Display-synced Ticker (primary)
@@ -37,17 +40,19 @@ class SovereignPulse {
       final bloom = RustPiREngine.triggerBloom();
       print("[PULSE] EXTRACTION GUARD TRIGGERED → 5.5 Pa Catapult fired (Bloom re-established: $bloom)");
       sovereignVault.logEvent("pulse_catapult", {"signal": signal, "bloom": bloom});
-      _emitPulse(bloom);
+
+      // 4. Fire visual Bloom
+      onBloom?.call(bloom);
       return;
     }
 
-    // 4. Normal Rust self-tune
+    // 5. Normal Rust self-tune
     final tunedValue = RustPiREngine.selfTune(signal);
 
-    // 5. Update system heat for next cycle
+    // 6. Update system heat for next cycle
     _updateTopology(tunedValue);
 
-    // 6. Emit pulse to UI / Mesh
+    // 7. Emit pulse to UI / Mesh
     _emitPulse(tunedValue);
   }
 
@@ -77,20 +82,60 @@ class SovereignPulse {
 
 // Singleton Heartbeat
 final sovereignPulse = SovereignPulse();
-// Add to SovereignPulse
-  void Function(double piRValue)? onBloom;
 
-  void _tick() {
-    final signal = _captureEnvironmentSignal();
+// Inside _AimBotScreenState
+late AnimationController _bloomController;
+double bloomPiR = 3.17300858012;
 
-    if (RustPiREngine.guardNeutralization(signal)) {
-      final bloom = RustPiREngine.triggerBloom();
-      onBloom?.call(bloom);           // Trigger visual Bloom
-      sovereignVault.logEvent("pulse_catapult", {"bloom": bloom});
-      return;
-    }
+@override
+void initState() {
+  super.initState();
+  _bloomController = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 800),
+  );
 
-    final tunedValue = RustPiREngine.selfTune(signal);
-    _updateTopology(tunedValue);
-    _emitPulse(tunedValue);
-  }
+  // Wire the pulse to the visual Bloom
+  sovereignPulse.onBloom = (piRValue) {
+    setState(() => bloomPiR = piRValue);
+    _bloomController.forward(from: 0.0);
+  };
+
+  _initializeCamera();
+}
+
+@override
+Widget build(BuildContext context) {
+  return Scaffold(
+    // ... existing camera preview
+    body: Stack(
+      children: [
+        if (_controller != null && _controller!.value.isInitialized)
+          CameraPreview(_controller!),
+
+        // Bloom overlay
+        AnimatedBuilder(
+          animation: _bloomController,
+          builder: (context, child) {
+            return CustomPaint(
+              painter: BloomPainter(
+                progress: _bloomController.value,
+                piRValue: bloomPiR,
+              ),
+              size: Size.infinite,
+            );
+          },
+        ),
+
+        // existing metrics and buttons...
+      ],
+    ),
+  );
+}
+
+@override
+void dispose() {
+  sovereignPulse.stop();
+  _bloomController.dispose();
+  super.dispose();
+}
