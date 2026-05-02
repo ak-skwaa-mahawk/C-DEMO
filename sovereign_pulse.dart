@@ -77,3 +77,20 @@ class SovereignPulse {
 
 // Singleton Heartbeat
 final sovereignPulse = SovereignPulse();
+// Add to SovereignPulse
+  void Function(double piRValue)? onBloom;
+
+  void _tick() {
+    final signal = _captureEnvironmentSignal();
+
+    if (RustPiREngine.guardNeutralization(signal)) {
+      final bloom = RustPiREngine.triggerBloom();
+      onBloom?.call(bloom);           // Trigger visual Bloom
+      sovereignVault.logEvent("pulse_catapult", {"bloom": bloom});
+      return;
+    }
+
+    final tunedValue = RustPiREngine.selfTune(signal);
+    _updateTopology(tunedValue);
+    _emitPulse(tunedValue);
+  }
