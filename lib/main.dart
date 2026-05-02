@@ -1,9 +1,15 @@
-// main.dart — Sovereign Aim Bot + Mesh Node (Phone = Floor Client)
+// main.dart — Sovereign Aim Bot with Real Camera + IMU (Phone = Floor Client)
 import 'package:flutter/material.dart';
-import 'dart:math';
-import 'sovereign_vault.dart'; // your SovereignVault.dart file
+import 'package:camera/camera.dart';      // real camera
+import 'package:sensors_plus/sensors_plus.dart'; // real IMU (accelerometer + gyroscope)
+import 'dart:async';
+import 'sovereign_vault.dart'; // your SovereignVault.dart
 
-void main() {
+late List<CameraDescription> cameras;
+
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  cameras = await availableCameras();
   runApp(const SovereignAimBotApp());
 }
 
@@ -28,75 +34,123 @@ class AimBotScreen extends StatefulWidget {
 }
 
 class _AimBotScreenState extends State<AimBotScreen> {
+  CameraController? _cameraController;
   double stability = 0.0;
   double vitality = 0.0;
   bool isMeshNode = false;
 
-  // Simulate phone sensor data (replace with real camera + IMU later)
-  void _simulateSensorTick() async {
-    final rawState = {
-      "center_x": Random().nextDouble() * 640,
-      "center_y": Random().nextDouble() * 480,
-      "vitality": Random().nextDouble(),
-    };
-
-    await sovereignVault.storeState(rawState, purpose: "vision_target");
-
-    final metric = await sovereignVault.computeMetric("aim_lock_stability");
-
-    setState(() {
-      stability = metric["stability_score"] ?? 0.0;
-      vitality = rawState["vitality"] ?? 0.0;
-    });
-  }
-
-  // Enable device as Floor mesh node
-  void _enableMeshNode() async {
-    await sovereignVault.enableMeshNodeMode();
-    setState(() => isMeshNode = true);
-    // Optional: run continuously as background node
-    sovereignVault.runAsNode();
-  }
+  StreamSubscription? _accelSubscription;
+  StreamSubscription? _gyroSubscription;
 
   @override
   void initState() {
     super.initState();
-    // Start sensor simulation
-    Future.delayed(Duration.zero, _simulateSensorTick);
+    _initializeCamera();
+    _startIMUSensors();
+    // Start continuous Floor-owned processing
+    Future.delayed(Duration.zero, _processFrame);
+  }
+
+  Future<void> _initializeCamera() async {
+    _cameraController = CameraController(cameras[0], ResolutionPreset.high);
+    await _cameraController!.initialize();
+    if (mounted) setState(() {});
+  }
+
+  void _startIMUSensors() {
+    // Real IMU data is captured but only derived metrics are used
+    _accelSubscription = accelerometerEvents.listen((AccelerometerEvent event) {
+      // Example: use tilt for stability calculation inside Vault
+      sovereignVault.storeState({
+        "accel_x": event.x,
+        "accel_y": event.y,
+        "accel_z": event.z,
+      }, purpose: "imu");
+    });
+
+    _gyroSubscription = gyroscopeEvents.listen((GyroscopeEvent event) {
+      sovereignVault.storeState({
+        "gyro_x": event.x,
+        "gyro_y": event.y,
+        "gyro_z": event.z,
+      }, purpose: "gyro");
+    });
+  }
+
+  Future<void> _processFrame() async {
+    if (_cameraController == null || !_cameraController!.value.isInitialized) {
+      Future.delayed(const Duration(milliseconds: 100), _processFrame);
+      return;
+    }
+
+    // Capture frame (raw data never leaves Vault)
+    final image = await _cameraController!.takePicture();
+    final rawState = {
+      "image_path": image.path, // in production: process bytes in enclave
+      "timestamp": DateTime.now().millisecondsSinceEpoch / 1000,
+    };
+    await sovereignVault.storeState(rawState, purpose: "vision_target");
+
+    // Vault computes derived metrics only
+    final metric = await sovereignVault.computeMetric("aim_lock_stability");
+
+    setState(() {
+      stability = metric["stability_score"] ?? 0.0;
+      vitality = 0.87; // simulated from contour size in real impl
+    });
+
+    // Repeat
+    Future.delayed(const Duration(milliseconds: 200), _processFrame);
+  }
+
+  void _enableMeshNode() async {
+    await sovereignVault.enableMeshNodeMode();
+    setState(() => isMeshNode = true);
+    sovereignVault.runAsNode();
+  }
+
+  @override
+  void dispose() {
+    _cameraController?.dispose();
+    _accelSubscription?.cancel();
+    _gyroSubscription?.cancel();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text("Sovereign Aim Bot — Floor Client")),
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Text("Phone = Floor Client\n5.5 Pa Gravity Equilibrium Active",
-                style: TextStyle(fontSize: 18)),
-            const SizedBox(height: 40),
-            Text("Vitality: ${vitality.toStringAsFixed(2)}",
-                style: const TextStyle(fontSize: 24, color: Colors.green)),
-            const SizedBox(height: 20),
-            Text("Stability: ${stability.toStringAsFixed(2)}",
-                style: const TextStyle(fontSize: 24, color: Colors.cyan)),
-            const SizedBox(height: 40),
-            ElevatedButton(
-              onPressed: _simulateSensorTick,
-              child: const Text("Simulate Sensor Tick (Real camera/IMU here)"),
+      body: Column(
+        children: [
+          if (_cameraController != null && _cameraController!.value.isInitialized)
+            Expanded(
+              child: CameraPreview(_cameraController!),
+            )
+          else
+            const Expanded(child: Center(child: CircularProgressIndicator())),
+
+          Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: Column(
+              children: [
+                Text("Vitality: ${vitality.toStringAsFixed(2)}",
+                    style: const TextStyle(fontSize: 24, color: Colors.green)),
+                Text("Stability: ${stability.toStringAsFixed(2)}",
+                    style: const TextStyle(fontSize: 24, color: Colors.cyan)),
+                const SizedBox(height: 20),
+                ElevatedButton(
+                  onPressed: _enableMeshNode,
+                  child: Text(isMeshNode ? "Mesh Node ACTIVE" : "Enable Floor Mesh Node Mode"),
+                ),
+                const SizedBox(height: 10),
+                const Text("All raw camera + IMU data owned by Ch’anchyah Vault\n"
+                    "Only derived metrics used for control + mesh relay",
+                    textAlign: TextAlign.center),
+              ],
             ),
-            const SizedBox(height: 20),
-            ElevatedButton(
-              onPressed: isMeshNode ? null : _enableMeshNode,
-              child: Text(isMeshNode ? "Mesh Node ACTIVE" : "Enable Floor Mesh Node Mode"),
-            ),
-            const SizedBox(height: 40),
-            const Text("All raw data owned by Ch’anchyah Vault\n"
-                "Only derived metrics used for control + mesh relay", 
-                textAlign: TextAlign.center),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
