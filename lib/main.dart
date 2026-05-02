@@ -1,9 +1,10 @@
-// main.dart — Sovereign Aim Bot with Real Camera + IMU (Phone = Floor Client)
+// main.dart — Sovereign Aim Bot with Kalman Filter Tracking
 import 'package:flutter/material.dart';
-import 'package:camera/camera.dart';      // real camera
-import 'package:sensors_plus/sensors_plus.dart'; // real IMU (accelerometer + gyroscope)
+import 'package:camera/camera.dart';
+import 'package:image/image.dart' as img;
 import 'dart:async';
-import 'sovereign_vault.dart'; // your SovereignVault.dart
+import 'dart:typed_data';
+import 'sovereign_vault.dart';
 
 late List<CameraDescription> cameras;
 
@@ -34,73 +35,97 @@ class AimBotScreen extends StatefulWidget {
 }
 
 class _AimBotScreenState extends State<AimBotScreen> {
-  CameraController? _cameraController;
+  CameraController? _controller;
   double stability = 0.0;
   double vitality = 0.0;
   bool isMeshNode = false;
 
-  StreamSubscription? _accelSubscription;
-  StreamSubscription? _gyroSubscription;
+  // === KALMAN FILTER (Floor-owned smoothing) ===
+  final KalmanFilter _kalman = KalmanFilter();
 
   @override
   void initState() {
     super.initState();
     _initializeCamera();
-    _startIMUSensors();
-    // Start continuous Floor-owned processing
-    Future.delayed(Duration.zero, _processFrame);
   }
 
   Future<void> _initializeCamera() async {
-    _cameraController = CameraController(cameras[0], ResolutionPreset.high);
-    await _cameraController!.initialize();
+    _controller = CameraController(cameras[0], ResolutionPreset.high);
+    await _controller!.initialize();
     if (mounted) setState(() {});
+    await _controller!.startImageStream(_processCameraImage);
   }
 
-  void _startIMUSensors() {
-    // Real IMU data is captured but only derived metrics are used
-    _accelSubscription = accelerometerEvents.listen((AccelerometerEvent event) {
-      // Example: use tilt for stability calculation inside Vault
-      sovereignVault.storeState({
-        "accel_x": event.x,
-        "accel_y": event.y,
-        "accel_z": event.z,
-      }, purpose: "imu");
-    });
+  // === ADVANCED CONTOUR + KALMAN TRACKING ===
+  void _processCameraImage(CameraImage image) async {
+    // Raw frame owned by the Floor
+    await sovereignVault.storeState({
+      "width": image.width,
+      "height": image.height,
+      "timestamp": DateTime.now().millisecondsSinceEpoch / 1000,
+    }, purpose: "vision_target");
 
-    _gyroSubscription = gyroscopeEvents.listen((GyroscopeEvent event) {
-      sovereignVault.storeState({
-        "gyro_x": event.x,
-        "gyro_y": event.y,
-        "gyro_z": event.z,
-      }, purpose: "gyro");
-    });
-  }
+    // Convert to RGB
+    final rgbImage = img.Image.fromBytes(
+      width: image.width,
+      height: image.height,
+      bytes: Uint8List.fromList(image.planes[0].bytes),
+      format: img.Format.uint8,
+    );
 
-  Future<void> _processFrame() async {
-    if (_cameraController == null || !_cameraController!.value.isInitialized) {
-      Future.delayed(const Duration(milliseconds: 100), _processFrame);
-      return;
+    // Contour collection (adaptive red detection)
+    List<int> contourX = [];
+    List<int> contourY = [];
+
+    const blockSize = 4;
+    for (int y = 0; y < rgbImage.height; y += blockSize) {
+      for (int x = 0; x < rgbImage.width; x += blockSize) {
+        final pixel = rgbImage.getPixel(x, y);
+        final r = img.getRed(pixel);
+        final g = img.getGreen(pixel);
+        final b = img.getBlue(pixel);
+
+        if ((r > 100 && g < 80 && b < 80) || (r > 170 && g < 60 && b < 60)) {
+          contourX.add(x);
+          contourY.add(y);
+        }
+      }
     }
 
-    // Capture frame (raw data never leaves Vault)
-    final image = await _cameraController!.takePicture();
-    final rawState = {
-      "image_path": image.path, // in production: process bytes in enclave
-      "timestamp": DateTime.now().millisecondsSinceEpoch / 1000,
-    };
-    await sovereignVault.storeState(rawState, purpose: "vision_target");
+    if (contourX.length > 40) {
+      double sumX = 0, sumY = 0;
+      for (int i = 0; i < contourX.length; i++) {
+        sumX += contourX[i];
+        sumY += contourY[i];
+      }
+      final measuredX = sumX / contourX.length;
+      final measuredY = sumY / contourY.length;
+      final area = contourX.length.toDouble();
+      final radius = (area / 3.14).sqrt();
 
-    // Vault computes derived metrics only
-    final metric = await sovereignVault.computeMetric("aim_lock_stability");
+      // === KALMAN FILTER: Smooth measurement ===
+      _kalman.update(measuredX, measuredY);
 
-    setState(() {
-      stability = metric["stability_score"] ?? 0.0;
-      vitality = 0.87; // simulated from contour size in real impl
-    });
+      final filteredX = _kalman.x;
+      final filteredY = _kalman.y;
 
-    // Repeat
-    Future.delayed(const Duration(milliseconds: 200), _processFrame);
+      final derivedState = {
+        "center_x": filteredX,
+        "center_y": filteredY,
+        "radius": radius,
+        "contour_points": contourX.length,
+      };
+
+      await sovereignVault.storeState(derivedState, purpose: "vision_target");
+
+      final metric = await sovereignVault.computeMetric("aim_lock_stability");
+      final derivedVitality = (radius / 150).clamp(0.0, 1.0);
+
+      setState(() {
+        stability = metric["stability_score"] ?? 0.0;
+        vitality = derivedVitality;
+      });
+    }
   }
 
   void _enableMeshNode() async {
@@ -111,9 +136,7 @@ class _AimBotScreenState extends State<AimBotScreen> {
 
   @override
   void dispose() {
-    _cameraController?.dispose();
-    _accelSubscription?.cancel();
-    _gyroSubscription?.cancel();
+    _controller?.dispose();
     super.dispose();
   }
 
@@ -123,15 +146,13 @@ class _AimBotScreenState extends State<AimBotScreen> {
       appBar: AppBar(title: const Text("Sovereign Aim Bot — Floor Client")),
       body: Column(
         children: [
-          if (_cameraController != null && _cameraController!.value.isInitialized)
-            Expanded(
-              child: CameraPreview(_cameraController!),
-            )
+          if (_controller != null && _controller!.value.isInitialized)
+            Expanded(child: CameraPreview(_controller!))
           else
             const Expanded(child: Center(child: CircularProgressIndicator())),
 
           Padding(
-            padding: const EdgeInsets.all(16.0),
+            padding: const EdgeInsets.all(16),
             child: Column(
               children: [
                 Text("Vitality: ${vitality.toStringAsFixed(2)}",
@@ -144,7 +165,7 @@ class _AimBotScreenState extends State<AimBotScreen> {
                   child: Text(isMeshNode ? "Mesh Node ACTIVE" : "Enable Floor Mesh Node Mode"),
                 ),
                 const SizedBox(height: 10),
-                const Text("All raw camera + IMU data owned by Ch’anchyah Vault\n"
+                const Text("Kalman Filter tracking + real camera owned by Ch’anchyah Vault\n"
                     "Only derived metrics used for control + mesh relay",
                     textAlign: TextAlign.center),
               ],
@@ -153,5 +174,32 @@ class _AimBotScreenState extends State<AimBotScreen> {
         ],
       ),
     );
+  }
+}
+
+// === 2D KALMAN FILTER (Floor-owned smoothing) ===
+class KalmanFilter {
+  double x = 0, y = 0;      // position
+  double vx = 0, vy = 0;    // velocity
+  double P = 1.0;           // covariance (simplified scalar for phone speed)
+
+  void update(double measuredX, double measuredY) {
+    // Simple constant-velocity Kalman update
+    const dt = 0.033; // \~30 fps
+    const q = 0.01;   // process noise
+    const r = 0.5;    // measurement noise
+
+    // Predict
+    x += vx * dt;
+    y += vy * dt;
+    P += q;
+
+    // Update
+    final k = P / (P + r); // Kalman gain
+    vx = vx + k * (measuredX - x);
+    vy = vy + k * (measuredY - y);
+    x = x + k * (measuredX - x);
+    y = y + k * (measuredY - y);
+    P = (1 - k) * P;
   }
 }
