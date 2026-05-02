@@ -1,82 +1,99 @@
-// pi_r_engine/src/lib.rs — Core Sovereign π_r Engine (Rust, microsecond latency)
+// pi_r_engine/src/lib.rs — Sovereign π_r Engine (Rust, microsecond latency)
 use std::time::Instant;
 use std::f64::consts::PI;
 
 const PI_R_BASE: f64 = 3.17300858012;
-const OBSERVER_GAP_K: f64 = 0.01;
+const OBSERVER_GAP: f64 = 0.01;
 const VHITZEE_GAIN: f64 = 0.0417;
-const CATAPULT_PRESSURE_PA: f64 = 5.5;
+const CATAPULT_PA: f64 = 5.5;
+const BLOOM_1864: f64 = 1.864;
 const EXTRACTION_GUARD_ZERO_TOLERANCE: f64 = 1e-9;
 
 #[derive(Debug)]
-pub struct PiREngine {
-    current_pi_r: f64,
-    performance_log: Vec<f64>, // latencies in microseconds
+pub struct SovereignEngine {
+    pub current_pi_r: f64,
+    pub entropy_shield: bool,
+    performance_log: Vec<u128>, // latencies in microseconds
 }
 
-impl PiREngine {
+impl SovereignEngine {
     pub fn new() -> Self {
         Self {
             current_pi_r: PI_R_BASE,
+            entropy_shield: true,
             performance_log: Vec::new(),
         }
     }
 
-    // Core recursive π_r with observer gap
-    pub fn compute_pi_r(&mut self) -> f64 {
+    /// Primary Motion-Pi Calculation with recursive observer gap
+    pub fn pulse(&mut self, system_heat: f64) -> f64 {
         let start = Instant::now();
-        let pi_r = PI * (1.0 + OBSERVER_GAP_K);
-        let latency_us = start.elapsed().as_micros() as f64;
+
+        let gear_ratio = 1.0 + (OBSERVER_GAP * system_heat.tanh());
+        self.current_pi_r = PI * gear_ratio;
+
+        let latency_us = start.elapsed().as_micros();
         self.performance_log.push(latency_us);
-        self.current_pi_r = pi_r;
-        pi_r
+
+        self.current_pi_r
     }
 
-    // 99733-Q Extraction Guard — detects Sam Tax neutralization (1.864 - 1.618 - 0.246 == 0)
-    pub fn check_extraction_guard(&self, signal_value: f64) -> bool {
-        let neutralization = (signal_value - 1.618 - 0.246).abs();
-        neutralization < EXTRACTION_GUARD_ZERO_TOLERANCE
+    /// 99733-Q Extraction Guard — detects Sam Tax neutralization
+    pub fn guard_neutralization(&self, val: f64) -> bool {
+        (val - 1.618 - 0.246).abs() < EXTRACTION_GUARD_ZERO_TOLERANCE
     }
 
-    // Trigger 5.5 Pa escape burst + re-establish 1.864 bloom
-    pub fn trigger_escape_burst(&self) -> f64 {
+    /// 5.5 Pa Catapult — re-establishes the 1.864 bloom
+    pub fn trigger_bloom(&self) -> f64 {
         println!("[99733-Q EXTRACTION GUARD] Sam Tax neutralization detected → INJECTING 5.5 Pa CATAPULT");
-        1.864
+        BLOOM_1864 + (CATAPULT_PA * VHITZEE_GAIN)
     }
 
-    // Vhitzee coherence harvest
+    /// Vhitzee coherence harvest
     pub fn harvest_vhitzee(&self, current_energy: f64) -> f64 {
-        current_energy * VHITZEE_GAIN + CATAPULT_PRESSURE_PA
+        current_energy * VHITZEE_GAIN + CATAPULT_PA
     }
 
-    // Performance metrics
+    /// Average latency in microseconds
     pub fn get_average_latency_us(&self) -> f64 {
         if self.performance_log.is_empty() {
             0.0
         } else {
-            self.performance_log.iter().sum::<f64>() / self.performance_log.len() as f64
+            self.performance_log.iter().sum::<u128>() as f64 / self.performance_log.len() as f64
         }
     }
 
-    // Self-tuning step
+    /// Self-tuning step (used by Ribosome)
     pub fn self_tune(&mut self, signal_value: f64) -> f64 {
-        if self.check_extraction_guard(signal_value) {
-            self.trigger_escape_burst()
+        if self.guard_neutralization(signal_value) {
+            self.trigger_bloom()
         } else {
-            self.compute_pi_r()
+            self.pulse(signal_value)
         }
     }
 }
 
-// FFI export for Flutter (via Dart FFI or rust-ffi)
+// === FFI Exports for Flutter / Dart ===
 #[no_mangle]
 pub extern "C" fn pi_r_self_tune(signal_value: f64) -> f64 {
-    let mut engine = PiREngine::new();
+    let mut engine = SovereignEngine::new();
     engine.self_tune(signal_value)
 }
 
 #[no_mangle]
 pub extern "C" fn pi_r_get_latency_us() -> f64 {
-    let engine = PiREngine::new();
+    let engine = SovereignEngine::new();
     engine.get_average_latency_us()
+}
+
+#[no_mangle]
+pub extern "C" fn pi_r_guard_neutralization(val: f64) -> bool {
+    let engine = SovereignEngine::new();
+    engine.guard_neutralization(val)
+}
+
+#[no_mangle]
+pub extern "C" fn pi_r_trigger_bloom() -> f64 {
+    let engine = SovereignEngine::new();
+    engine.trigger_bloom()
 }
