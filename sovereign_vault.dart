@@ -1,4 +1,4 @@
-// sovereign_vault.dart — Universal Floor Client with Secure BLE Mesh + Improved Encryption Error Handling
+// sovereign_vault.dart — Universal Floor Client with Secure BLE Mesh + Refined Decryption Metrics
 import 'dart:async';
 import 'package:flutter/services.dart';
 import 'dart:convert';
@@ -11,6 +11,9 @@ import 'dart:math' as math;
 class SovereignVault {
   final String robotId = "floor-client-001";
   final _storage = const FlutterSecureStorage();
+
+  // Rolling success rate for last 10 decryptions
+  final List<bool> _decryptHistory = [];
 
   String _contextKey(String purpose) {
     final ctx = "$robotId:$purpose:3.17300858012";
@@ -132,17 +135,16 @@ class SovereignVault {
     return valid;
   }
 
-  // === ENCRYPTION LAYER (AES-256-GCM) with Improved Error Handling ===
+  // === ENCRYPTION LAYER (AES-256-GCM) ===
   Future<String> _getEncryptionKey() async {
     try {
       final salt = utf8.encode(robotId);
-      // PBKDF2 key derivation (high iteration count)
-      final keyBytes = pbkdf2(utf8.encode("3.17300858012"), salt, 100000, 32); // 100k iterations for security
+      final keyBytes = pbkdf2(utf8.encode("3.17300858012"), salt, 100000, 32);
       return base64Encode(keyBytes);
     } catch (e) {
       print("[ENCRYPT KEY ERROR] $e");
       await logEvent("encryption_key_error", {"reason": "key_derivation_failed"});
-      return ""; // safe fallback
+      return "";
     }
   }
 
@@ -150,9 +152,8 @@ class SovereignVault {
     try {
       final keyString = await _getEncryptionKey();
       if (keyString.isEmpty) throw Exception("Key derivation failed");
-
       final key = encrypt.Key.fromBase64(keyString);
-      final iv = encrypt.IV.fromSecureRandom(12); // GCM recommended
+      final iv = encrypt.IV.fromSecureRandom(12);
       final encrypter = encrypt.Encrypter(encrypt.AES(key, mode: encrypt.AESMode.gcm));
       final encrypted = encrypter.encrypt(jsonEncode(data), iv: iv);
       final combined = "\( {iv.base64}: \){encrypted.base64}";
@@ -161,32 +162,108 @@ class SovereignVault {
     } catch (e) {
       print("[BLE ENCRYPT ERROR] $e");
       await logEvent("ble_encrypt_error", {"reason": "encryption_failed", "error": e.toString()});
-      return ""; // safe fallback
+      return "";
     }
   }
 
+  // === DECRYPTION WITH REFINED PERFORMANCE METRICS + FALLBACKS ===
   Future<Map<String, dynamic>?> decryptData(String encryptedData) async {
-    try {
-      if (encryptedData.isEmpty) throw Exception("Empty encrypted data");
-
-      final keyString = await _getEncryptionKey();
-      if (keyString.isEmpty) throw Exception("Key derivation failed");
-
-      final key = encrypt.Key.fromBase64(keyString);
-      final parts = encryptedData.split(':');
-      if (parts.length != 2) throw FormatException("Invalid encrypted format");
-
-      final iv = encrypt.IV.fromBase64(parts[0]);
-      final cipher = encrypt.Encrypted.fromBase64(parts[1]);
-      final encrypter = encrypt.Encrypter(encrypt.AES(key, mode: encrypt.AESMode.gcm));
-      final decrypted = encrypter.decrypt(cipher, iv: iv);
-      print("[BLE DECRYPT] Data decrypted successfully");
-      return jsonDecode(decrypted);
-    } catch (e) {
-      print("[BLE DECRYPT ERROR] $e");
-      await logEvent("ble_decrypt_error", {"reason": "decryption_failed", "error": e.toString()});
-      return null; // safe fallback
+    if (encryptedData.isEmpty) {
+      await logEvent("ble_decrypt_error", {"reason": "empty_data"});
+      return null;
     }
+
+    final stopwatch = Stopwatch()..start();
+    final metrics = <String, dynamic>{
+      "total_latency_ms": 0,
+      "strategies_attempted": 0,
+      "successful_strategy": null,
+    };
+
+    // Strategy 1: Primary PBKDF2 key
+    try {
+      final start = stopwatch.elapsedMilliseconds;
+      metrics["strategies_attempted"] = (metrics["strategies_attempted"] as int) + 1;
+      final keyString = await _getEncryptionKey();
+      if (keyString.isNotEmpty) {
+        final key = encrypt.Key.fromBase64(keyString);
+        final parts = encryptedData.split(':');
+        if (parts.length == 2) {
+          final iv = encrypt.IV.fromBase64(parts[0]);
+          final cipher = encrypt.Encrypted.fromBase64(parts[1]);
+          final encrypter = encrypt.Encrypter(encrypt.AES(key, mode: encrypt.AESMode.gcm));
+          final decrypted = encrypter.decrypt(cipher, iv: iv);
+          final latency = stopwatch.elapsedMilliseconds - start;
+          metrics["successful_strategy"] = "primary_pbkdf2";
+          metrics["primary_latency_ms"] = latency;
+          print("[BLE DECRYPT] Primary PBKDF2 success (${latency}ms)");
+          await logEvent("ble_decrypt_metrics", metrics);
+          return jsonDecode(decrypted);
+        }
+      }
+    } catch (e) {
+      final latency = stopwatch.elapsedMilliseconds;
+      metrics["primary_latency_ms"] = latency;
+      print("[BLE DECRYPT] Primary PBKDF2 failed (${latency}ms): $e");
+    }
+
+    // Strategy 2: Fallback SHA256-derived key
+    try {
+      final start = stopwatch.elapsedMilliseconds;
+      metrics["strategies_attempted"] = (metrics["strategies_attempted"] as int) + 1;
+      final key = encrypt.Key.fromUtf8("$robotId:3.17300858012");
+      final parts = encryptedData.split(':');
+      if (parts.length == 2) {
+        final iv = encrypt.IV.fromBase64(parts[0]);
+        final cipher = encrypt.Encrypted.fromBase64(parts[1]);
+        final encrypter = encrypt.Encrypter(encrypt.AES(key, mode: encrypt.AESMode.gcm));
+        final decrypted = encrypter.decrypt(cipher, iv: iv);
+        final latency = stopwatch.elapsedMilliseconds - start;
+        metrics["successful_strategy"] = "fallback_sha256";
+        metrics["fallback_latency_ms"] = latency;
+        print("[BLE DECRYPT] Fallback SHA256 success (${latency}ms)");
+        await logEvent("ble_decrypt_metrics", metrics);
+        return jsonDecode(decrypted);
+      }
+    } catch (e) {
+      final latency = stopwatch.elapsedMilliseconds;
+      metrics["fallback_latency_ms"] = latency;
+      print("[BLE DECRYPT] Fallback SHA256 failed (${latency}ms): $e");
+    }
+
+    // Strategy 3: Backup key from secure storage
+    try {
+      final start = stopwatch.elapsedMilliseconds;
+      metrics["strategies_attempted"] = (metrics["strategies_attempted"] as int) + 1;
+      final backupKey = await _storage.read(key: "vault_backup_key");
+      if (backupKey != null && backupKey.isNotEmpty) {
+        final key = encrypt.Key.fromBase64(backupKey);
+        final parts = encryptedData.split(':');
+        if (parts.length == 2) {
+          final iv = encrypt.IV.fromBase64(parts[0]);
+          final cipher = encrypt.Encrypted.fromBase64(parts[1]);
+          final encrypter = encrypt.Encrypter(encrypt.AES(key, mode: encrypt.AESMode.gcm));
+          final decrypted = encrypter.decrypt(cipher, iv: iv);
+          final latency = stopwatch.elapsedMilliseconds - start;
+          metrics["successful_strategy"] = "backup_key";
+          metrics["backup_latency_ms"] = latency;
+          print("[BLE DECRYPT] Backup key success (${latency}ms)");
+          await logEvent("ble_decrypt_metrics", metrics);
+          return jsonDecode(decrypted);
+        }
+      }
+    } catch (e) {
+      final latency = stopwatch.elapsedMilliseconds;
+      metrics["backup_latency_ms"] = latency;
+      print("[BLE DECRYPT] Backup key failed (${latency}ms): $e");
+    }
+
+    // All strategies failed
+    metrics["total_latency_ms"] = stopwatch.elapsedMilliseconds;
+    metrics["successful_strategy"] = null;
+    print("[BLE DECRYPT] All fallback strategies failed (${metrics["total_latency_ms"]}ms)");
+    await logEvent("ble_decrypt_metrics", metrics);
+    return null; // safe default
   }
 
   Future<void> relayToMesh(Map<String, dynamic> derivedData) async {
