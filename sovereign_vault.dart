@@ -1,13 +1,13 @@
-// sovereign_vault.dart — Universal Floor Client (Flutter)
+// sovereign_vault.dart — Universal Floor Client (Flutter / iOS + Android)
 import 'dart:async';
-import 'package:flutter/services.dart'; // for platform channels / native calls
+import 'package:flutter/services.dart';
 import 'dart:convert';
-import 'package:crypto/crypto.dart';   // π_r context seed
+import 'package:crypto/crypto.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 class SovereignVault {
   final String robotId = "floor-client-001";
-  final _storage = const FlutterSecureStorage(); // native enclave-backed on iOS/Android
+  final _storage = const FlutterSecureStorage(); // native enclave-backed storage
 
   String _contextKey(String purpose) {
     // π_r dimensional offset — purpose-bound rotating context
@@ -41,15 +41,13 @@ class SovereignVault {
   }
 
   Future<void> logEvent(String eventType, Map<String, dynamic> payload) async {
-    // Immutable audit log inside enclave
     print("[VAULT AUDIT] $eventType | $payload (observer gap enforced)");
   }
 }
 
 // Singleton — the phone IS the Floor
 final sovereignVault = SovereignVault();
-
-// Example: camera or IMU data
+// Example: camera / IMU / Bluetooth data
 final rawState = {
   "center_x": 320,
   "center_y": 240,
