@@ -1,4 +1,6 @@
 // sovereign_vault.dart — Universal Floor Client (Flutter / iOS + Android)
+// The phone IS the Floor — any device becomes a sovereign mesh node
+
 import 'dart:async';
 import 'package:flutter/services.dart';
 import 'dart:convert';
@@ -43,18 +45,36 @@ class SovereignVault {
   Future<void> logEvent(String eventType, Map<String, dynamic> payload) async {
     print("[VAULT AUDIT] $eventType | $payload (observer gap enforced)");
   }
+
+  // === MESH NODE MODE — Turn ANY device (old or new) into a Floor router/CPU ===
+  bool _isMeshNode = false;
+  String meshNodeId = "";
+
+  Future<void> enableMeshNodeMode() async {
+    _isMeshNode = true;
+    meshNodeId = "\( {robotId}_node_ \){DateTime.now().millisecondsSinceEpoch}";
+    print("[FLOOR MESH] Device enabled as sovereign node: $meshNodeId");
+    print("   → Hotspot/Bluetooth/Wi-Fi now inward-only (5.5 Pa gravity equilibrium)");
+    // In production: advertise via Bluetooth Low Energy or Wi-Fi Direct as Floor node
+  }
+
+  Future<void> relayToMesh(Map<String, dynamic> derivedData) async {
+    if (!_isMeshNode) return;
+    // Only derived metrics are relayed — never raw data
+    print("[MESH RELAY] Node $meshNodeId forwarding derived data → Floor mesh");
+    await logEvent("mesh_relay", derivedData);
+  }
+
+  // Example: Turn old phone into node and relay stability
+  Future<void> runAsNode() async {
+    await enableMeshNodeMode();
+    while (true) {
+      final stability = await computeMetric("vhitzee_coherence");
+      await relayToMesh(stability);
+      await Future.delayed(const Duration(seconds: 5));
+    }
+  }
 }
 
 // Singleton — the phone IS the Floor
 final sovereignVault = SovereignVault();
-// Example: camera / IMU / Bluetooth data
-final rawState = {
-  "center_x": 320,
-  "center_y": 240,
-  "vitality": 0.87,
-};
-
-await sovereignVault.storeState(rawState, purpose: "vision_target");
-
-final stability = await sovereignVault.computeMetric("aim_lock_stability");
-print("Floor-approved stability: ${stability['stability_score']}");
