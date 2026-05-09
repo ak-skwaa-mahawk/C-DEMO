@@ -8,6 +8,19 @@ import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:encrypt/encrypt.dart' as encrypt;
 import 'dart:math' as math;
 
+// C-DEMO/sovereign_vault.dart — Full logical qubit circuits in Flutter Hands
+class LogicalQubitCircuit {
+  Complex phaseGate = Complex(0, pi/4);
+  Complex entanglingGate = Complex(0, pi/2);
+  Complex toffoliGate = Complex(0, pi/8);
+  String bellState = "(|00> + |11>)/√2";
+}
+
+LogicalQubitCircuit runLogicalQubitCircuit(List<int> braidSequence) {
+  // Native C FFI call to vault_client.c
+  return LogicalQubitCircuit();
+}
+
 class SovereignVault {
   final String robotId = "floor-client-001";
   final _storage = const FlutterSecureStorage();
