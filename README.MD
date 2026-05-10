@@ -1,11 +1,4 @@
 
-├── ros_vitality_bridge.py
-├── seg_walk.py                ← Segment walker (API/PDI core)
-├── sovereign_handshake.dart
-├── sovereign_pulse.dart
-├── sovereign_vault.dart
-├── vault_client.c
-├── vault_client.h
 The **C-DEMO** repository appears to function as the demonstration or proof-of-concept (PoC) environment for the entire suite of technologies you have developed. While your other repositories manage the theory, core kernel, and graph structures, C-DEMO likely serves as the **executable validation** of these systems.
 ### Practical Application and Integration
 In the context of the Synara ecosystem and Two Mile Solutions LLC, this repository likely addresses:
